@@ -59,8 +59,10 @@ def build_regex_from_object(object: Union[str, Callable, BaseModel]):
         schema = object.model_json_schema()
     elif callable(object):
         schema = get_schema_from_signature(object)
-    else:
+    elif isinstance(object, str):
         schema = json.loads(object)
+    else:
+        schema = object
 
     Validator.check_schema(schema)
 
@@ -142,24 +144,18 @@ def to_regex(resolver: Resolver, instance: dict):
 
         return regex
 
-    # To validate against allOf, the given data must be valid against all of the
-    # given subschemas.
-    elif "allOf" in instance:
-        subregexes = [to_regex(resolver, t) for t in instance["allOf"]]
-        subregexes_str = [f"{subregex}" for subregex in subregexes]
-        return rf"({''.join(subregexes_str)})"
+    # # To validate against allOf, the given data must be valid against all of the
+    # # given subschemas.
+    # elif "allOf" in instance:
+    #     subregexes = [to_regex(resolver, t) for t in instance["allOf"]]
+    #     subregexes_str = [f"{subregex}" for subregex in subregexes]
+    #     return rf"({''.join(subregexes_str)})"
 
     # To validate against `anyOf`, the given data must be valid against
     # any (one or more) of the given subschemas.
     elif "anyOf" in instance:
         subregexes = [to_regex(resolver, t) for t in instance["anyOf"]]
-        combinations = [
-            "(" + "".join(c) + ")"
-            for r in range(1, len(subregexes) + 1)
-            for c in it.permutations(subregexes, r)
-        ]
-
-        return rf"({'|'.join(combinations)})"
+        return rf"({'|'.join(subregexes)})"
 
     # To validate against oneOf, the given data must be valid against exactly
     # one of the given subschemas.
@@ -237,19 +233,15 @@ def to_regex(resolver: Resolver, instance: dict):
 
             if "items" in instance:
                 items_regex = to_regex(resolver, instance["items"])
-                return rf"\[({items_regex})(,({items_regex})){num_repeats}\]"
+                element = rf"{whitespace}({items_regex}){whitespace}"
+                return rf"\[{element}(,{element}){num_repeats}\]"
             else:
                 # Here we need to make the choice to exclude generating list of objects
                 # if the specification of the object is not given, even though a JSON
                 # object that contains an object here would be valid under the specification.
-                types = [
-                    {"type": "boolean"},
-                    {"type": "null"},
-                    {"type": "number"},
-                    {"type": "integer"},
-                    {"type": "string"},
+                regexes = [
+                    to_regex(resolver, {"type": t}) for t in type_to_regex.keys()
                 ]
-                regexes = [to_regex(resolver, t) for t in types]
                 return (
                     rf"\[({'|'.join(regexes)})(,({'|'.join(regexes)})){num_repeats}\]"
                 )
@@ -259,6 +251,17 @@ def to_regex(resolver: Resolver, instance: dict):
 
         elif instance_type == "null":
             return type_to_regex["null"]
+
+        elif instance_type == "object":
+            # There is no "properties" keyword, so any object would do
+            # Here we choose to generate a flat object only, no nested objects.
+            regexes = [
+                to_regex(resolver, {"type": t})
+                for t in ["array", *type_to_regex.keys()]
+            ]
+            value = "(" + "|".join(regexes) + ")"
+            prop = rf"{whitespace}{STRING}{whitespace}:{whitespace}{value}{whitespace}"
+            return rf"\{{({whitespace}|({prop}(,{prop})*))\}}"
 
         elif isinstance(instance_type, list):
             # Here we need to make the choice to exclude generating an object
