@@ -261,6 +261,27 @@ def _walk_fsm(
     return accepted_states
 
 
+@numba.njit(nogil=True, cache=True)
+def _walk_fsm_simple(
+    fsm_transitions: Dict[Tuple[int, int], int],
+    alphabet_symbol_mapping: Dict[str, int],
+    alphabet_anything_value: int,
+    input_string: str,
+    start_state: int,
+) -> int:
+    state = start_state
+
+    for symbol in input_string:
+        trans_key = alphabet_symbol_mapping.get(symbol, alphabet_anything_value)
+
+        new_state = fsm_transitions.get((state, trans_key))
+        if new_state is None:
+            return -100
+        state = _nonoptional(new_state)
+
+    return state
+
+
 def walk_fsm(
     fsm: BetterFSM,
     input_string: str,
@@ -463,30 +484,25 @@ def state_scan_tokens(
     fsm_transitions: Dict[Tuple[int, int], int],
     alphabet_symbol_mapping: Dict[str, int],
     alphabet_anything_value: int,
-    fsm_initial: int,
-    fsm_finals: Set[int],
     vocabulary: Dict[str, List[int]],
     start_state: int,
 ) -> Set[Tuple[int, int]]:
     res = set()
 
     for token, token_ids in vocabulary.items():
-        state_seq = _walk_fsm(
+        state = _walk_fsm_simple(
             fsm_transitions,
             alphabet_symbol_mapping,
             alphabet_anything_value,
-            fsm_initial,
-            fsm_finals,
             token,
             start_state,
-            False,
         )
 
-        if state_seq is not None and len(state_seq) < len(token):
+        if state == -100:
             continue
 
         for token_id in token_ids:
-            res.add((token_id, state_seq[-1]))
+            res.add((token_id, state))
 
     return res
 
@@ -510,8 +526,6 @@ def create_fsm_index_end_to_end(
             fsm_info.transitions,
             fsm_info.alphabet_symbol_mapping,
             fsm_info.alphabet_anything_value,
-            fsm_info.initial,
-            fsm_info.finals,
             vocabulary,
             start_state,
         )

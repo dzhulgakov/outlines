@@ -37,7 +37,7 @@ class StopAtTokenFSM(FSM):
 
     def __init__(self, tokenizer: "Tokenizer", stop_token_id: int):
         self.stop_token_id = stop_token_id
-        self.vocabulary = tokenizer.vocabulary.values()
+        self.all_token_ids = list(tokenizer.vocabulary.values())
         self.final_states = {1}
 
     def allowed_token_ids(self, state: FSMState) -> List[int]:
@@ -57,7 +57,7 @@ class StopAtTokenFSM(FSM):
 
         """
         if state == 0:
-            return list(self.vocabulary)
+            return self.all_token_ids
         else:
             return [self.stop_token_id]
 
@@ -119,7 +119,6 @@ class RegexFSM(FSM):
         self.final_states = regex_fsm.finals | {
             -1
         }  # Include the EOS token in final states
-        self.vocabulary = tokenizer.vocabulary.values()
         self.end_token_id = tokenizer.eos_token_id
 
     def allowed_token_ids(self, state: FSMState) -> List[int]:
